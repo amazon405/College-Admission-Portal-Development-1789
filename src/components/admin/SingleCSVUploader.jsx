@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
 
-const { FiUpload, FiCheck, FiX, FiAlertCircle, FiFile, FiLoader, FiInfo } = FiIcons;
+const { FiUpload, FiCheck, FiX, FiAlertCircle, FiFile, FiLoader, FiInfo, FiPlus } = FiIcons;
 
 const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
   const [file, setFile] = useState(null);
@@ -184,20 +184,57 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
         const lines = text.split('\n').filter(line => line.trim());
         const headers = parseCSVLine(lines[0]);
         
-        const processedData = {
+        // Load existing data from localStorage
+        const existingDataStr = localStorage.getItem('josaaAdminData');
+        let existingData = {
           colleges: [],
+          institutes: [],
+          programs: [],
+          categories: [],
+          rounds: []
+        };
+
+        if (existingDataStr) {
+          try {
+            existingData = JSON.parse(existingDataStr);
+          } catch (error) {
+            console.error('Error parsing existing data:', error);
+          }
+        }
+
+        const processedData = {
+          colleges: [...existingData.colleges], // Start with existing data
           institutes: new Set(),
           programs: new Set(),
           categories: new Set(),
           rounds: new Set()
         };
 
+        // Add existing unique values to Sets
+        existingData.institutes?.forEach(item => {
+          processedData.institutes.add(JSON.stringify(item));
+        });
+        existingData.programs?.forEach(item => {
+          processedData.programs.add(JSON.stringify(item));
+        });
+        existingData.categories?.forEach(item => {
+          processedData.categories.add(JSON.stringify(item));
+        });
+        existingData.rounds?.forEach(item => {
+          processedData.rounds.add(JSON.stringify(item));
+        });
+
         const totalLines = lines.length - 1; // Excluding header
         let processedLines = 0;
+        let newRecordsAdded = 0;
+        let duplicatesSkipped = 0;
 
         // Process in chunks to avoid UI freezing
         const CHUNK_SIZE = 100;
         const chunks = Math.ceil(totalLines / CHUNK_SIZE);
+
+        // Get the current highest rank to continue numbering
+        let currentMaxRank = Math.max(0, ...existingData.colleges.map(c => c.rank || 0));
 
         for (let chunk = 0; chunk < chunks; chunk++) {
           const start = chunk * CHUNK_SIZE + 1; // +1 to skip header
@@ -220,9 +257,26 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
                 // Skip empty rows
                 if (!row['College'] || !row['Couse']) continue;
 
+                // Check for duplicates based on key fields
+                const isDuplicate = processedData.colleges.some(existing => 
+                  existing.instituteName === row['College'] &&
+                  existing.branch === row['Couse'] &&
+                  existing.category === (row['Seat Type'] || 'OPEN') &&
+                  existing.gender === (row['Gender'] || 'Gender-Neutral') &&
+                  existing.round === (row['Round'] || 'Round-1') &&
+                  existing.openingRank === parseRank(row['Opening Rank']) &&
+                  existing.closingRank === parseRank(row['Closing Rank'])
+                );
+
+                if (isDuplicate) {
+                  duplicatesSkipped++;
+                  processedLines++;
+                  continue;
+                }
+
                 // Transform the data to match your existing structure
                 const collegeEntry = {
-                  rank: processedLines + 1, // Generate sequential rank
+                  rank: ++currentMaxRank, // Increment rank for new entries
                   year: row['Year'] || '2025',
                   round: row['Round'] || 'Round-1',
                   instituteName: row['College'],
@@ -239,6 +293,7 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
                 };
 
                 processedData.colleges.push(collegeEntry);
+                newRecordsAdded++;
 
                 // Collect unique values for other data types
                 processedData.institutes.add(JSON.stringify({
@@ -294,7 +349,10 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
         // Small delay to show 100% completion
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        onUploadComplete(finalData);
+        // Show summary of what was added
+        const summaryMessage = `Upload complete! Added ${newRecordsAdded} new records. ${duplicatesSkipped > 0 ? `Skipped ${duplicatesSkipped} duplicates.` : ''} Total records: ${finalData.colleges.length}`;
+        
+        onUploadComplete(finalData, summaryMessage);
         setIsProcessing(false);
       };
       
@@ -306,7 +364,7 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
     }
   };
 
-  // Helper functions
+  // Helper functions (same as before)
   const generateInstituteCode = (collegeName) => {
     if (collegeName.includes('IIT')) {
       const match = collegeName.match(/IIT\s+(\w+)/i);
@@ -447,6 +505,25 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
             <span>Selected file: {file.name} ({Math.round(file.size / 1024)} KB)</span>
           </div>
         )}
+      </div>
+
+      {/* Append Mode Notice */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex">
+          <SafeIcon icon={FiPlus} className="text-blue-500 mr-3 mt-0.5 flex-shrink-0" />
+          <div>
+            <h4 className="text-sm font-medium text-blue-800 mb-2">Append Mode</h4>
+            <div className="text-sm text-blue-700">
+              <p className="mb-2">New data will be <strong>added</strong> to your existing database, not replaced.</p>
+              <ul className="space-y-1 text-xs">
+                <li>• Duplicate entries will be automatically detected and skipped</li>
+                <li>• New records will be assigned sequential rank numbers</li>
+                <li>• Your existing data remains safe and unchanged</li>
+                <li>• Use the Data Management section to manually delete records if needed</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Errors */}
@@ -597,7 +674,7 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
             </div>
             <div className="text-xs text-blue-600 flex items-center">
               <SafeIcon icon={FiLoader} className="animate-spin mr-2" />
-              Converting JOSAA data to application format...
+              Adding new JOSAA data to existing database...
             </div>
           </div>
         </div>
@@ -652,8 +729,8 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
             </>
           ) : (
             <>
-              <SafeIcon icon={FiUpload} className="mr-2" />
-              Process JOSAA Data
+              <SafeIcon icon={FiPlus} className="mr-2" />
+              Add JOSAA Data
             </>
           )}
         </button>

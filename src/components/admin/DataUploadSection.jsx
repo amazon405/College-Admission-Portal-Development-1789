@@ -3,18 +3,23 @@ import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
 import SingleCSVUploader from './SingleCSVUploader';
 
-const { FiUpload, FiDownload, FiDatabase, FiInfo, FiCheck } = FiIcons;
+const { FiUpload, FiDownload, FiDatabase, FiInfo, FiCheck, FiPlus } = FiIcons;
 
 const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
   const [showUploader, setShowUploader] = useState(false);
 
-  const handleUploadComplete = (uploadedData) => {
+  const handleUploadComplete = (uploadedData, summaryMessage) => {
     onDataUpdate(uploadedData);
     
-    const totalRecords = Object.values(uploadedData).reduce((sum, arr) => sum + (arr?.length || 0), 0);
-    const sectionsUpdated = Object.keys(uploadedData).filter(key => uploadedData[key] && uploadedData[key].length > 0).length;
+    // Use the custom summary message from the uploader if provided
+    if (summaryMessage) {
+      onNotification(summaryMessage, 'success');
+    } else {
+      const totalRecords = Object.values(uploadedData).reduce((sum, arr) => sum + (arr?.length || 0), 0);
+      const sectionsUpdated = Object.keys(uploadedData).filter(key => uploadedData[key] && uploadedData[key].length > 0).length;
+      onNotification(`Upload complete! ${totalRecords} records processed across ${sectionsUpdated} data sections.`, 'success');
+    }
     
-    onNotification(`Upload complete! ${totalRecords} records processed across ${sectionsUpdated} data sections.`, 'success');
     setShowUploader(false);
   };
 
@@ -188,12 +193,12 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
           </div>
           
           <h3 className="text-xl font-semibold text-blue-900 mb-2">
-            📊 JOSAA CSV Upload
+            📊 JOSAA CSV Upload (Append Mode)
           </h3>
           
           <p className="text-blue-700 mb-6 max-w-2xl mx-auto">
             Upload your JOSAA cutoff data directly from the official CSV format. 
-            The system will automatically convert and organize the data into colleges, institutes, programs, categories, and rounds.
+            New data will be <strong>added</strong> to your existing database without replacing current records.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-6">
@@ -201,8 +206,8 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
               onClick={() => setShowUploader(true)}
               className="flex items-center justify-center px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg"
             >
-              <SafeIcon icon={FiUpload} className="mr-2" />
-              Upload JOSAA CSV
+              <SafeIcon icon={FiPlus} className="mr-2" />
+              Add JOSAA Data
             </button>
             
             <button
@@ -216,19 +221,19 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
 
           <div className="flex flex-wrap justify-center gap-3">
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
-              ✓ Official JOSAA format
+              ✓ Append Mode
             </span>
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
-              ✓ Automatic data conversion
+              ✓ Duplicate Detection
             </span>
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
-              ✓ Bulk processing
+              ✓ Data Preservation
             </span>
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
-              ✓ Smart validation
+              ✓ Smart Validation
             </span>
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
-              ✓ Progress tracking
+              ✓ Progress Tracking
             </span>
           </div>
         </div>
@@ -274,17 +279,20 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
         <div className="flex">
           <SafeIcon icon={FiInfo} className="text-amber-500 mr-3 mt-0.5 flex-shrink-0" />
           <div>
-            <h4 className="text-sm font-medium text-amber-800 mb-2">JOSAA CSV Format Guide</h4>
+            <h4 className="text-sm font-medium text-amber-800 mb-2">JOSAA CSV Upload Guide (Append Mode)</h4>
             <ul className="text-sm text-amber-700 space-y-1">
               <li>• <strong>Required Headers:</strong> Year, Round, College, Couse, Quota, Seat Type, Gender, Opening Rank, Closing Rank</li>
               <li>• <strong>Data Source:</strong> Use official JOSAA cutoff data from JoSAA website</li>
+              <li>• <strong>Append Mode:</strong> New data is added to existing records, not replaced</li>
+              <li>• <strong>Duplicate Handling:</strong> The system automatically detects and skips duplicate entries</li>
               <li>• <strong>Automatic Processing:</strong> The system will automatically:</li>
               <li className="ml-4">- Extract institute information from college names</li>
               <li className="ml-4">- Generate program codes from course names</li>
               <li className="ml-4">- Create category and round data</li>
               <li className="ml-4">- Assign institute types (IIT, NIT, IIIT, etc.)</li>
-              <li>• <strong>Large Files:</strong> Can handle thousands of records efficiently</li>
-              <li>• <strong>Validation:</strong> Automatic validation and error reporting</li>
+              <li className="ml-4">- Continue rank numbering from existing data</li>
+              <li>• <strong>Data Safety:</strong> Your existing data is preserved and remains unchanged</li>
+              <li>• <strong>Manual Deletion:</strong> Use the Data Management section to remove unwanted records</li>
             </ul>
           </div>
         </div>
@@ -295,7 +303,7 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Upload JOSAA CSV Data</h3>
+              <h3 className="text-lg font-semibold">Add New JOSAA CSV Data</h3>
               <button
                 onClick={() => setShowUploader(false)}
                 className="text-gray-500 hover:text-gray-700 text-xl"
