@@ -2,25 +2,37 @@ import React, { useState } from 'react';
 import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
 import SingleCSVUploader from './SingleCSVUploader';
+import { processCSVData } from '../../services/supabaseService';
 
-const { FiUpload, FiDownload, FiDatabase, FiInfo, FiCheck, FiPlus } = FiIcons;
+const { FiUpload, FiDownload, FiDatabase, FiInfo, FiCheck, FiPlus, FiRefreshCw } = FiIcons;
 
-const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
+const DataUploadSection = ({ data, onDataUpdate, onNotification, onRefresh }) => {
   const [showUploader, setShowUploader] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleUploadComplete = (uploadedData, summaryMessage) => {
-    onDataUpdate(uploadedData);
-    
-    // Use the custom summary message from the uploader if provided
-    if (summaryMessage) {
-      onNotification(summaryMessage, 'success');
-    } else {
-      const totalRecords = Object.values(uploadedData).reduce((sum, arr) => sum + (arr?.length || 0), 0);
-      const sectionsUpdated = Object.keys(uploadedData).filter(key => uploadedData[key] && uploadedData[key].length > 0).length;
-      onNotification(`Upload complete! ${totalRecords} records processed across ${sectionsUpdated} data sections.`, 'success');
+  const handleUploadComplete = async (csvData) => {
+    setIsProcessing(true);
+    try {
+      // Process and save CSV data to Supabase
+      const results = await processCSVData(csvData);
+      
+      // Refresh data from database
+      onRefresh();
+      
+      // Show summary message
+      const totalRecords = Object.values(results).reduce((sum, count) => sum + count, 0);
+      onNotification(
+        `Upload complete! Added ${totalRecords} records: ${results.colleges} colleges, ${results.institutes} institutes, ${results.programs} programs, ${results.categories} categories, ${results.rounds} rounds.`,
+        'success'
+      );
+      
+      setShowUploader(false);
+    } catch (error) {
+      console.error('Error processing upload:', error);
+      onNotification('Error processing upload: ' + error.message, 'error');
+    } finally {
+      setIsProcessing(false);
     }
-    
-    setShowUploader(false);
   };
 
   const generateSampleJOSAACSV = () => {
@@ -205,29 +217,49 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
             <button
               onClick={() => setShowUploader(true)}
               className="flex items-center justify-center px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg"
+              disabled={isProcessing}
             >
-              <SafeIcon icon={FiPlus} className="mr-2" />
-              Add JOSAA Data
+              {isProcessing ? (
+                <>
+                  <SafeIcon icon={FiRefreshCw} className="animate-spin mr-2" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <SafeIcon icon={FiPlus} className="mr-2" />
+                  Add JOSAA Data
+                </>
+              )}
             </button>
             
             <button
               onClick={generateSampleJOSAACSV}
               className="flex items-center justify-center px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-lg"
+              disabled={isProcessing}
             >
               <SafeIcon icon={FiDownload} className="mr-2" />
               Download Sample CSV
+            </button>
+            
+            <button
+              onClick={onRefresh}
+              className="flex items-center justify-center px-8 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg"
+              disabled={isProcessing}
+            >
+              <SafeIcon icon={FiRefreshCw} className="mr-2" />
+              Refresh Data
             </button>
           </div>
 
           <div className="flex flex-wrap justify-center gap-3">
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
+              ✓ Database Storage
+            </span>
+            <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
               ✓ Append Mode
             </span>
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
               ✓ Duplicate Detection
-            </span>
-            <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
-              ✓ Data Preservation
             </span>
             <span className="px-4 py-2 bg-blue-100 text-blue-800 text-sm rounded-full">
               ✓ Smart Validation
@@ -290,9 +322,8 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
               <li className="ml-4">- Generate program codes from course names</li>
               <li className="ml-4">- Create category and round data</li>
               <li className="ml-4">- Assign institute types (IIT, NIT, IIIT, etc.)</li>
-              <li className="ml-4">- Continue rank numbering from existing data</li>
-              <li>• <strong>Data Safety:</strong> Your existing data is preserved and remains unchanged</li>
-              <li>• <strong>Manual Deletion:</strong> Use the Data Management section to remove unwanted records</li>
+              <li>• <strong>Data Persistence:</strong> All data is now stored in a secure database</li>
+              <li>• <strong>Manual Management:</strong> Use the Data Management section to edit or remove records</li>
             </ul>
           </div>
         </div>
@@ -307,6 +338,7 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
               <button
                 onClick={() => setShowUploader(false)}
                 className="text-gray-500 hover:text-gray-700 text-xl"
+                disabled={isProcessing}
               >
                 ✕
               </button>
@@ -315,6 +347,7 @@ const DataUploadSection = ({ data, onDataUpdate, onNotification }) => {
             <SingleCSVUploader
               onUploadComplete={handleUploadComplete}
               onCancel={() => setShowUploader(false)}
+              isProcessing={isProcessing}
             />
           </div>
         </div>

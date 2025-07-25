@@ -4,10 +4,9 @@ import SafeIcon from '../../common/SafeIcon';
 
 const { FiUpload, FiCheck, FiX, FiAlertCircle, FiFile, FiLoader, FiInfo, FiPlus } = FiIcons;
 
-const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
+const SingleCSVUploader = ({ onUploadComplete, onCancel, isProcessing = false }) => {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [errors, setErrors] = useState([]);
   const [validationResults, setValidationResults] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -172,9 +171,6 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
 
   const processCSVData = async () => {
     if (!file || !preview) return;
-
-    setIsProcessing(true);
-    setUploadProgress(0);
     
     try {
       const reader = new FileReader();
@@ -184,285 +180,44 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
         const lines = text.split('\n').filter(line => line.trim());
         const headers = parseCSVLine(lines[0]);
         
-        // Load existing data from localStorage
-        const existingDataStr = localStorage.getItem('josaaAdminData');
-        let existingData = {
-          colleges: [],
-          institutes: [],
-          programs: [],
-          categories: [],
-          rounds: []
-        };
-
-        if (existingDataStr) {
-          try {
-            existingData = JSON.parse(existingDataStr);
-          } catch (error) {
-            console.error('Error parsing existing data:', error);
+        const parsedData = [];
+        
+        // Process each line
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line.trim()) continue;
+          
+          const values = parseCSVLine(line);
+          if (values.length !== headers.length) continue;
+          
+          const row = {};
+          headers.forEach((header, headerIndex) => {
+            row[header] = values[headerIndex] || '';
+          });
+          
+          // Skip empty rows
+          if (!row['College'] || !row['Couse']) continue;
+          
+          parsedData.push(row);
+          
+          // Update progress periodically
+          if (i % 10 === 0) {
+            setUploadProgress(Math.round((i / lines.length) * 100));
           }
         }
-
-        const processedData = {
-          colleges: [...existingData.colleges], // Start with existing data
-          institutes: new Set(),
-          programs: new Set(),
-          categories: new Set(),
-          rounds: new Set()
-        };
-
-        // Add existing unique values to Sets
-        existingData.institutes?.forEach(item => {
-          processedData.institutes.add(JSON.stringify(item));
-        });
-        existingData.programs?.forEach(item => {
-          processedData.programs.add(JSON.stringify(item));
-        });
-        existingData.categories?.forEach(item => {
-          processedData.categories.add(JSON.stringify(item));
-        });
-        existingData.rounds?.forEach(item => {
-          processedData.rounds.add(JSON.stringify(item));
-        });
-
-        const totalLines = lines.length - 1; // Excluding header
-        let processedLines = 0;
-        let newRecordsAdded = 0;
-        let duplicatesSkipped = 0;
-
-        // Process in chunks to avoid UI freezing
-        const CHUNK_SIZE = 100;
-        const chunks = Math.ceil(totalLines / CHUNK_SIZE);
-
-        // Get the current highest rank to continue numbering
-        let currentMaxRank = Math.max(0, ...existingData.colleges.map(c => c.rank || 0));
-
-        for (let chunk = 0; chunk < chunks; chunk++) {
-          const start = chunk * CHUNK_SIZE + 1; // +1 to skip header
-          const end = Math.min((chunk + 1) * CHUNK_SIZE + 1, lines.length);
-          
-          await new Promise(resolve => {
-            setTimeout(() => {
-              for (let i = start; i < end; i++) {
-                const line = lines[i];
-                if (!line.trim()) continue;
-                
-                const values = parseCSVLine(line);
-                if (values.length !== headers.length) continue;
-                
-                const row = {};
-                headers.forEach((header, headerIndex) => {
-                  row[header] = values[headerIndex] || '';
-                });
-
-                // Skip empty rows
-                if (!row['College'] || !row['Couse']) continue;
-
-                // Check for duplicates based on key fields
-                const isDuplicate = processedData.colleges.some(existing => 
-                  existing.instituteName === row['College'] &&
-                  existing.branch === row['Couse'] &&
-                  existing.category === (row['Seat Type'] || 'OPEN') &&
-                  existing.gender === (row['Gender'] || 'Gender-Neutral') &&
-                  existing.round === (row['Round'] || 'Round-1') &&
-                  existing.openingRank === parseRank(row['Opening Rank']) &&
-                  existing.closingRank === parseRank(row['Closing Rank'])
-                );
-
-                if (isDuplicate) {
-                  duplicatesSkipped++;
-                  processedLines++;
-                  continue;
-                }
-
-                // Transform the data to match your existing structure
-                const collegeEntry = {
-                  rank: ++currentMaxRank, // Increment rank for new entries
-                  year: row['Year'] || '2025',
-                  round: row['Round'] || 'Round-1',
-                  instituteName: row['College'],
-                  instituteCode: generateInstituteCode(row['College']),
-                  location: extractLocation(row['College']),
-                  instituteType: determineInstituteType(row['College']),
-                  branch: row['Couse'],
-                  duration: extractDuration(row['Couse']),
-                  quota: row['Quota'] || 'AI',
-                  category: row['Seat Type'] || 'OPEN',
-                  gender: row['Gender'] || 'Gender-Neutral',
-                  openingRank: parseRank(row['Opening Rank']),
-                  closingRank: parseRank(row['Closing Rank'])
-                };
-
-                processedData.colleges.push(collegeEntry);
-                newRecordsAdded++;
-
-                // Collect unique values for other data types
-                processedData.institutes.add(JSON.stringify({
-                  value: collegeEntry.instituteCode,
-                  label: collegeEntry.instituteName,
-                  type: collegeEntry.instituteType,
-                  location: collegeEntry.location
-                }));
-
-                processedData.programs.add(JSON.stringify({
-                  value: generateProgramCode(row['Couse']),
-                  label: row['Couse'],
-                  duration: extractDuration(row['Couse']),
-                  degree: extractDegree(row['Couse'])
-                }));
-
-                processedData.categories.add(JSON.stringify({
-                  value: row['Seat Type'] || 'OPEN',
-                  label: row['Seat Type'] || 'OPEN',
-                  description: getCategoryDescription(row['Seat Type'] || 'OPEN')
-                }));
-
-                processedData.rounds.add(JSON.stringify({
-                  value: `Round-${row['Round'] || '1'}`,
-                  label: `Round ${row['Round'] || '1'}`,
-                  year: row['Year'] || '2025',
-                  status: 'Completed'
-                }));
-
-                processedLines++;
-              }
-              
-              const progress = Math.round((processedLines / totalLines) * 100);
-              setUploadProgress(progress);
-              
-              resolve();
-            }, 0);
-          });
-        }
-
-        // Convert Sets back to arrays
-        const finalData = {
-          colleges: processedData.colleges,
-          institutes: Array.from(processedData.institutes).map(item => JSON.parse(item)),
-          programs: Array.from(processedData.programs).map(item => JSON.parse(item)),
-          categories: Array.from(processedData.categories).map(item => JSON.parse(item)),
-          rounds: Array.from(processedData.rounds).map(item => JSON.parse(item))
-        };
-
+        
         // Ensure 100% at the end
         setUploadProgress(100);
         
-        // Small delay to show 100% completion
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Show summary of what was added
-        const summaryMessage = `Upload complete! Added ${newRecordsAdded} new records. ${duplicatesSkipped > 0 ? `Skipped ${duplicatesSkipped} duplicates.` : ''} Total records: ${finalData.colleges.length}`;
-        
-        onUploadComplete(finalData, summaryMessage);
-        setIsProcessing(false);
+        // Pass the parsed data to the parent component for further processing
+        onUploadComplete(parsedData);
       };
       
       reader.readAsText(file);
     } catch (error) {
       console.error('Error processing CSV:', error);
       setErrors([`Error processing file: ${error.message}`]);
-      setIsProcessing(false);
     }
-  };
-
-  // Helper functions (same as before)
-  const generateInstituteCode = (collegeName) => {
-    if (collegeName.includes('IIT')) {
-      const match = collegeName.match(/IIT\s+(\w+)/i);
-      return match ? `IIT${match[1].substring(0, 3).toUpperCase()}` : 'IIT001';
-    }
-    if (collegeName.includes('NIT')) {
-      const match = collegeName.match(/NIT\s+(\w+)/i);
-      return match ? `NIT${match[1].substring(0, 3).toUpperCase()}` : 'NIT001';
-    }
-    if (collegeName.includes('IIIT')) {
-      const match = collegeName.match(/IIIT\s+(\w+)/i);
-      return match ? `IIIT${match[1].substring(0, 3).toUpperCase()}` : 'IIIT001';
-    }
-    return 'INST001';
-  };
-
-  const extractLocation = (collegeName) => {
-    // Try to extract location from college name
-    const locations = {
-      'Bombay': 'Mumbai, Maharashtra',
-      'Delhi': 'New Delhi, Delhi',
-      'Madras': 'Chennai, Tamil Nadu',
-      'Kanpur': 'Kanpur, Uttar Pradesh',
-      'Kharagpur': 'Kharagpur, West Bengal',
-      'Roorkee': 'Roorkee, Uttarakhand',
-      'Guwahati': 'Guwahati, Assam',
-      'Hyderabad': 'Hyderabad, Telangana',
-      'Bhubaneswar': 'Bhubaneswar, Odisha',
-      'Indore': 'Indore, Madhya Pradesh'
-    };
-
-    for (const [key, value] of Object.entries(locations)) {
-      if (collegeName.includes(key)) {
-        return value;
-      }
-    }
-    return 'India';
-  };
-
-  const determineInstituteType = (collegeName) => {
-    if (collegeName.includes('IIT')) return 'IIT';
-    if (collegeName.includes('NIT')) return 'NIT';
-    if (collegeName.includes('IIIT')) return 'IIIT';
-    if (collegeName.includes('IIEST')) return 'IIEST';
-    return 'GFTI';
-  };
-
-  const extractDuration = (courseName) => {
-    if (courseName.includes('4 Years')) return '4 Years';
-    if (courseName.includes('5 Years')) return '5 Years';
-    if (courseName.includes('3 Years')) return '3 Years';
-    if (courseName.includes('2 Years')) return '2 Years';
-    return '4 Years'; // Default
-  };
-
-  const extractDegree = (courseName) => {
-    if (courseName.includes('Bachelor of Technology')) return 'B.Tech';
-    if (courseName.includes('Bachelor of Science')) return 'B.Sc';
-    if (courseName.includes('Bachelor of Architecture')) return 'B.Arch';
-    if (courseName.includes('Master of Technology')) return 'M.Tech';
-    if (courseName.includes('Master of Science')) return 'M.Sc';
-    return 'B.Tech'; // Default
-  };
-
-  const generateProgramCode = (courseName) => {
-    // Generate a simple hash-based code
-    let hash = 0;
-    for (let i = 0; i < courseName.length; i++) {
-      const char = courseName.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return Math.abs(hash).toString().substring(0, 4);
-  };
-
-  const getCategoryDescription = (category) => {
-    const descriptions = {
-      'OPEN': 'General Category',
-      'EWS': 'Economically Weaker Section',
-      'OBC-NCL': 'Other Backward Classes - Non Creamy Layer',
-      'SC': 'Scheduled Caste',
-      'ST': 'Scheduled Tribe',
-      'OPEN (PwD)': 'General Category - Persons with Disability',
-      'EWS (PwD)': 'EWS - Persons with Disability',
-      'OBC-NCL (PwD)': 'OBC-NCL - Persons with Disability',
-      'SC (PwD)': 'SC - Persons with Disability',
-      'ST (PwD)': 'ST - Persons with Disability'
-    };
-    return descriptions[category] || category;
-  };
-
-  const parseRank = (rankStr) => {
-    if (!rankStr) return 0;
-    // Handle special cases like "50P" (PwD ranks)
-    if (rankStr.includes('P')) {
-      return parseInt(rankStr.replace('P', '')) || 0;
-    }
-    return parseInt(rankStr) || 0;
   };
 
   const canProceed = preview && validationResults && 
@@ -512,14 +267,14 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
         <div className="flex">
           <SafeIcon icon={FiPlus} className="text-blue-500 mr-3 mt-0.5 flex-shrink-0" />
           <div>
-            <h4 className="text-sm font-medium text-blue-800 mb-2">Append Mode</h4>
+            <h4 className="text-sm font-medium text-blue-800 mb-2">Database Persistence</h4>
             <div className="text-sm text-blue-700">
-              <p className="mb-2">New data will be <strong>added</strong> to your existing database, not replaced.</p>
+              <p className="mb-2">New data will be <strong>added</strong> to your database and stored securely.</p>
               <ul className="space-y-1 text-xs">
+                <li>• All data is stored in a secure database for persistence</li>
                 <li>• Duplicate entries will be automatically detected and skipped</li>
                 <li>• New records will be assigned sequential rank numbers</li>
-                <li>• Your existing data remains safe and unchanged</li>
-                <li>• Use the Data Management section to manually delete records if needed</li>
+                <li>• Use the Data Management section to manually edit or delete records if needed</li>
               </ul>
             </div>
           </div>
@@ -674,7 +429,7 @@ const SingleCSVUploader = ({ onUploadComplete, onCancel }) => {
             </div>
             <div className="text-xs text-blue-600 flex items-center">
               <SafeIcon icon={FiLoader} className="animate-spin mr-2" />
-              Adding new JOSAA data to existing database...
+              Adding new JOSAA data to database...
             </div>
           </div>
         </div>

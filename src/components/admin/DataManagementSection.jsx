@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
+import { TableNames, deleteItem, addItem, updateItem } from '../../services/supabaseService';
 
-const { FiEdit2, FiTrash2, FiPlus, FiSearch, FiFilter } = FiIcons;
+const { FiEdit2, FiTrash2, FiPlus, FiSearch, FiFilter, FiRefreshCw } = FiIcons;
 
-const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
+const DataManagementSection = ({ data, onDataUpdate, onNotification, onRefresh }) => {
   const [activeSection, setActiveSection] = useState('colleges');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItems, setSelectedItems] = useState([]);
   const [editingItem, setEditingItem] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const sections = [
     { id: 'colleges', label: 'Colleges', count: data.colleges?.length || 0 },
@@ -20,6 +23,7 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
   ];
 
   const getCurrentData = () => data[activeSection] || [];
+  
   const getFilteredData = () => {
     const currentData = getCurrentData();
     if (!searchTerm) return currentData;
@@ -31,24 +35,73 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
     );
   };
 
-  const handleDelete = (index) => {
-    if (window.confirm('Are you sure you want to delete this item?')) {
-      const newData = { ...data };
-      newData[activeSection].splice(index, 1);
-      onDataUpdate(newData);
-      onNotification('Item deleted successfully', 'success');
+  const getTableName = () => {
+    switch (activeSection) {
+      case 'colleges': return TableNames.COLLEGES;
+      case 'institutes': return TableNames.INSTITUTES;
+      case 'programs': return TableNames.PROGRAMS;
+      case 'categories': return TableNames.CATEGORIES;
+      case 'rounds': return TableNames.ROUNDS;
+      default: return null;
     }
   };
 
-  const handleBulkDelete = () => {
+  const handleDelete = async (item) => {
+    if (window.confirm(`Are you sure you want to delete this item: ${item.label || item.instituteName || item.value}?`)) {
+      setIsDeleting(true);
+      try {
+        await deleteItem(getTableName(), item.id);
+        onNotification('Item deleted successfully', 'success');
+        onRefresh(); // Refresh data from database
+      } catch (error) {
+        console.error('Error deleting item:', error);
+        onNotification(`Error deleting item: ${error.message}`, 'error');
+      } finally {
+        setIsDeleting(false);
+      }
+    }
+  };
+
+  const handleBulkDelete = async () => {
     if (selectedItems.length === 0) return;
     
     if (window.confirm(`Are you sure you want to delete ${selectedItems.length} items?`)) {
-      const newData = { ...data };
-      newData[activeSection] = newData[activeSection].filter((_, index) => !selectedItems.includes(index));
-      onDataUpdate(newData);
-      setSelectedItems([]);
-      onNotification(`${selectedItems.length} items deleted successfully`, 'success');
+      setIsDeleting(true);
+      try {
+        const tableName = getTableName();
+        const currentData = getCurrentData();
+        
+        // Get the actual items to delete
+        const itemsToDelete = selectedItems.map(index => currentData[index]);
+        
+        // Delete each item sequentially
+        let successCount = 0;
+        let errorCount = 0;
+        
+        for (const item of itemsToDelete) {
+          try {
+            await deleteItem(tableName, item.id);
+            successCount++;
+          } catch (error) {
+            console.error(`Error deleting item ${item.id}:`, error);
+            errorCount++;
+          }
+        }
+        
+        if (errorCount === 0) {
+          onNotification(`${successCount} items deleted successfully`, 'success');
+        } else {
+          onNotification(`${successCount} items deleted, ${errorCount} failed`, 'warning');
+        }
+        
+        setSelectedItems([]);
+        onRefresh(); // Refresh data from database
+      } catch (error) {
+        console.error('Error during bulk delete:', error);
+        onNotification(`Error during bulk delete: ${error.message}`, 'error');
+      } finally {
+        setIsDeleting(false);
+      }
     }
   };
 
@@ -56,31 +109,46 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
     setEditingItem({ ...item, index });
   };
 
-  const handleSaveEdit = (updatedItem) => {
-    const newData = { ...data };
-    newData[activeSection][updatedItem.index] = { ...updatedItem };
-    delete newData[activeSection][updatedItem.index].index;
-    onDataUpdate(newData);
-    setEditingItem(null);
-    onNotification('Item updated successfully', 'success');
+  const handleSaveEdit = async (updatedItem) => {
+    setIsUpdating(true);
+    try {
+      // Remove the index property before saving
+      const { index, ...itemToUpdate } = updatedItem;
+      
+      await updateItem(getTableName(), itemToUpdate.id, itemToUpdate);
+      onNotification('Item updated successfully', 'success');
+      setEditingItem(null);
+      onRefresh(); // Refresh data from database
+    } catch (error) {
+      console.error('Error updating item:', error);
+      onNotification(`Error updating item: ${error.message}`, 'error');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const handleAdd = (newItem) => {
-    const newData = { ...data };
-    if (!newData[activeSection]) newData[activeSection] = [];
-    newData[activeSection].push(newItem);
-    onDataUpdate(newData);
-    setShowAddForm(false);
-    onNotification('Item added successfully', 'success');
+  const handleAdd = async (newItem) => {
+    setIsUpdating(true);
+    try {
+      await addItem(getTableName(), newItem);
+      onNotification('Item added successfully', 'success');
+      setShowAddForm(false);
+      onRefresh(); // Refresh data from database
+    } catch (error) {
+      console.error('Error adding item:', error);
+      onNotification(`Error adding item: ${error.message}`, 'error');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const getFieldsForSection = (section) => {
     const fieldMap = {
-      colleges: ['rank', 'instituteName', 'instituteCode', 'location', 'instituteType', 'branch', 'duration', 'category', 'gender', 'openingRank', 'closingRank', 'round'],
+      colleges: ['rank', 'instituteName', 'instituteCode', 'location', 'instituteType', 'branch', 'duration', 'category', 'gender', 'openingRank', 'closingRank', 'round', 'quota', 'year'],
       institutes: ['value', 'label', 'type', 'location'],
       programs: ['value', 'label', 'duration', 'degree'],
       categories: ['value', 'label', 'description'],
-      rounds: ['value', 'label', 'startDate', 'endDate']
+      rounds: ['value', 'label', 'year', 'startDate', 'endDate', 'status']
     };
     return fieldMap[section] || [];
   };
@@ -101,6 +169,7 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
                   setSelectedItems([]);
                 }
               }}
+              disabled={isDeleting || isUpdating}
             />
           </th>
           {fields.map(field => (
@@ -133,6 +202,7 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
                     setSelectedItems(selectedItems.filter(i => i !== index));
                   }
                 }}
+                disabled={isDeleting || isUpdating}
               />
             </td>
             {fields.map(field => (
@@ -145,14 +215,16 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
                 <button
                   onClick={() => handleEdit(item, index)}
                   className="text-blue-600 hover:text-blue-800"
+                  disabled={isDeleting || isUpdating}
                 >
                   <SafeIcon icon={FiEdit2} />
                 </button>
                 <button
-                  onClick={() => handleDelete(index)}
+                  onClick={() => handleDelete(item)}
                   className="text-red-600 hover:text-red-800"
+                  disabled={isDeleting || isUpdating}
                 >
-                  <SafeIcon icon={FiTrash2} />
+                  <SafeIcon icon={FiTrash2} className={isDeleting ? 'animate-spin' : ''} />
                 </button>
               </div>
             </td>
@@ -167,13 +239,24 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
       {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900">Data Management</h2>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        >
-          <SafeIcon icon={FiPlus} className="mr-2" />
-          Add New
-        </button>
+        <div className="flex space-x-2">
+          <button
+            onClick={onRefresh}
+            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+            disabled={isDeleting || isUpdating}
+          >
+            <SafeIcon icon={FiRefreshCw} className="mr-2" />
+            Refresh Data
+          </button>
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            disabled={isDeleting || isUpdating}
+          >
+            <SafeIcon icon={FiPlus} className="mr-2" />
+            Add New
+          </button>
+        </div>
       </div>
 
       {/* Section Tabs */}
@@ -182,12 +265,16 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
           {sections.map(section => (
             <button
               key={section.id}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => {
+                setActiveSection(section.id);
+                setSelectedItems([]);
+              }}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeSection === section.id
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
+              disabled={isDeleting || isUpdating}
             >
               {section.label} ({section.count})
             </button>
@@ -206,17 +293,22 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isDeleting || isUpdating}
             />
           </div>
           {selectedItems.length > 0 && (
             <button
               onClick={handleBulkDelete}
               className="flex items-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+              disabled={isDeleting || isUpdating}
             >
-              <SafeIcon icon={FiTrash2} className="mr-2" />
-              Delete Selected ({selectedItems.length})
+              <SafeIcon icon={isDeleting ? FiRefreshCw : FiTrash2} className={`mr-2 ${isDeleting ? 'animate-spin' : ''}`} />
+              {isDeleting ? 'Deleting...' : `Delete Selected (${selectedItems.length})`}
             </button>
           )}
+        </div>
+        <div className="text-sm text-gray-500">
+          {getFilteredData().length} of {getCurrentData().length} items
         </div>
       </div>
 
@@ -237,6 +329,7 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
           fields={getFieldsForSection(activeSection)}
           onSave={handleSaveEdit}
           onCancel={() => setEditingItem(null)}
+          isUpdating={isUpdating}
         />
       )}
 
@@ -246,13 +339,14 @@ const DataManagementSection = ({ data, onDataUpdate, onNotification }) => {
           fields={getFieldsForSection(activeSection)}
           onAdd={handleAdd}
           onCancel={() => setShowAddForm(false)}
+          isUpdating={isUpdating}
         />
       )}
     </div>
   );
 };
 
-const EditModal = ({ item, fields, onSave, onCancel }) => {
+const EditModal = ({ item, fields, onSave, onCancel, isUpdating }) => {
   const [formData, setFormData] = useState(item);
 
   const handleSubmit = (e) => {
@@ -271,10 +365,11 @@ const EditModal = ({ item, fields, onSave, onCancel }) => {
                 {field}
               </label>
               <input
-                type="text"
+                type={field.includes('rank') ? 'number' : 'text'}
                 value={formData[field] || ''}
                 onChange={(e) => setFormData({...formData, [field]: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isUpdating || field === 'id'}
               />
             </div>
           ))}
@@ -283,14 +378,23 @@ const EditModal = ({ item, fields, onSave, onCancel }) => {
               type="button"
               onClick={onCancel}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              disabled={isUpdating}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center"
+              disabled={isUpdating}
             >
-              Save Changes
+              {isUpdating ? (
+                <>
+                  <SafeIcon icon={FiRefreshCw} className="animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
             </button>
           </div>
         </form>
@@ -299,7 +403,7 @@ const EditModal = ({ item, fields, onSave, onCancel }) => {
   );
 };
 
-const AddModal = ({ fields, onAdd, onCancel }) => {
+const AddModal = ({ fields, onAdd, onCancel, isUpdating }) => {
   const [formData, setFormData] = useState({});
 
   const handleSubmit = (e) => {
@@ -318,10 +422,11 @@ const AddModal = ({ fields, onAdd, onCancel }) => {
                 {field}
               </label>
               <input
-                type="text"
+                type={field.includes('rank') ? 'number' : 'text'}
                 value={formData[field] || ''}
                 onChange={(e) => setFormData({...formData, [field]: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isUpdating}
               />
             </div>
           ))}
@@ -330,14 +435,23 @@ const AddModal = ({ fields, onAdd, onCancel }) => {
               type="button"
               onClick={onCancel}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              disabled={isUpdating}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center"
+              disabled={isUpdating}
             >
-              Add Item
+              {isUpdating ? (
+                <>
+                  <SafeIcon icon={FiRefreshCw} className="animate-spin mr-2" />
+                  Adding...
+                </>
+              ) : (
+                'Add Item'
+              )}
             </button>
           </div>
         </form>

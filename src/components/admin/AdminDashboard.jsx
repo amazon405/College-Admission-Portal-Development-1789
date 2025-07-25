@@ -6,6 +6,7 @@ import DataManagementSection from './DataManagementSection';
 import StatisticsSection from './StatisticsSection';
 import BackupSection from './BackupSection';
 import supabase from '../../lib/supabase';
+import { fetchAllData } from '../../services/supabaseService';
 
 const { FiDatabase, FiUpload, FiBarChart3, FiSettings, FiDownload, FiHome, FiLogOut } = FiIcons;
 
@@ -18,7 +19,7 @@ const AdminDashboard = () => {
     categories: [],
     rounds: []
   });
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [notification, setNotification] = useState(null);
   const [user, setUser] = useState(null);
 
@@ -41,24 +42,43 @@ const AdminDashboard = () => {
     getCurrentUser();
   }, []);
 
-  const loadExistingData = () => {
+  const loadExistingData = async () => {
+    setIsLoading(true);
     try {
-      // Load existing data from localStorage
-      const savedData = localStorage.getItem('josaaAdminData');
-      if (savedData) {
-        const parsedData = JSON.parse(savedData);
-        setData(parsedData);
-      }
+      // First try to fetch from Supabase
+      const supabaseData = await fetchAllData();
+      setData(supabaseData);
+      
+      // Also save to localStorage as a backup/cache
+      localStorage.setItem('josaaAdminData', JSON.stringify(supabaseData));
     } catch (error) {
-      console.error('Error loading existing data:', error);
-      showNotification('Error loading existing data', 'error');
+      console.error('Error loading data from Supabase:', error);
+      showNotification('Failed to fetch data from database. Using cached data if available.', 'error');
+      
+      // Try to use cached data from localStorage as fallback
+      try {
+        const savedData = localStorage.getItem('josaaAdminData');
+        if (savedData) {
+          const parsedData = JSON.parse(savedData);
+          setData(parsedData);
+          showNotification('Using cached data from local storage', 'info');
+        }
+      } catch (localError) {
+        console.error('Error loading local data:', localError);
+        showNotification('Could not load any data', 'error');
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const saveData = (newData) => {
+  const saveData = async (newData) => {
     try {
       setData(newData);
+      
+      // Save to localStorage as backup/cache
       localStorage.setItem('josaaAdminData', JSON.stringify(newData));
+      
       showNotification('Data saved successfully!', 'success');
     } catch (error) {
       console.error('Error saving data:', error);
@@ -68,7 +88,7 @@ const AdminDashboard = () => {
 
   const showNotification = (message, type = 'info') => {
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
+    setTimeout(() => setNotification(null), 5000);
   };
 
   const handleLogout = async () => {
@@ -89,6 +109,10 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleRefresh = () => {
+    loadExistingData();
+  };
+
   const tabs = [
     { id: 'upload', label: 'Data Upload', icon: FiUpload },
     { id: 'manage', label: 'Data Management', icon: FiDatabase },
@@ -99,9 +123,9 @@ const AdminDashboard = () => {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'upload':
-        return <DataUploadSection data={data} onDataUpdate={saveData} onNotification={showNotification} />;
+        return <DataUploadSection data={data} onDataUpdate={saveData} onNotification={showNotification} onRefresh={handleRefresh} />;
       case 'manage':
-        return <DataManagementSection data={data} onDataUpdate={saveData} onNotification={showNotification} />;
+        return <DataManagementSection data={data} onDataUpdate={saveData} onNotification={showNotification} onRefresh={handleRefresh} />;
       case 'statistics':
         return <StatisticsSection data={data} />;
       case 'backup':

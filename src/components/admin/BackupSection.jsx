@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import * as FiIcons from 'react-icons/fi';
 import SafeIcon from '../../common/SafeIcon';
+import { fetchAllData } from '../../services/supabaseService';
 
-const { FiDownload, FiUpload, FiSave, FiRefreshCw, FiDatabase } = FiIcons;
+const { FiDownload, FiUpload, FiSave, FiRefreshCw, FiDatabase, FiServer } = FiIcons;
 
 const BackupSection = ({ data, onNotification }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const exportToCSV = (sectionData, filename) => {
     if (!sectionData || sectionData.length === 0) {
@@ -18,7 +20,14 @@ const BackupSection = ({ data, onNotification }) => {
     const csvContent = [
       headers.join(','),
       ...sectionData.map(row => 
-        headers.map(header => `"${row[header] || ''}"`).join(',')
+        headers.map(header => {
+          const value = row[header] || '';
+          // Properly escape values with commas or quotes
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return `${value}`;
+        }).join(',')
       )
     ].join('\n');
 
@@ -53,7 +62,8 @@ const BackupSection = ({ data, onNotification }) => {
 
       onNotification('All data exported successfully!', 'success');
     } catch (error) {
-      onNotification('Error exporting data', 'error');
+      console.error('Error exporting data:', error);
+      onNotification('Error exporting data: ' + error.message, 'error');
     } finally {
       setIsExporting(false);
     }
@@ -97,7 +107,7 @@ const BackupSection = ({ data, onNotification }) => {
 
           if (hasValidStructure) {
             localStorage.setItem('josaaAdminData', JSON.stringify(backupData.data));
-            onNotification('Backup imported successfully! Please refresh the page.', 'success');
+            onNotification('Backup imported successfully to local cache! Please note this does not update the database.', 'success');
           } else {
             onNotification('Invalid backup file structure', 'error');
           }
@@ -105,7 +115,7 @@ const BackupSection = ({ data, onNotification }) => {
           onNotification('Invalid backup file format', 'error');
         }
       } catch (error) {
-        onNotification('Error reading backup file', 'error');
+        onNotification('Error reading backup file: ' + error.message, 'error');
       } finally {
         setIsImporting(false);
       }
@@ -114,10 +124,23 @@ const BackupSection = ({ data, onNotification }) => {
     reader.readAsText(file);
   };
 
-  const clearAllData = () => {
-    if (window.confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
-      localStorage.removeItem('josaaAdminData');
-      onNotification('All data cleared. Please refresh the page.', 'success');
+  const refreshFromDatabase = async () => {
+    setIsRefreshing(true);
+    try {
+      const freshData = await fetchAllData();
+      
+      // Update local cache
+      localStorage.setItem('josaaAdminData', JSON.stringify(freshData));
+      
+      onNotification('Data refreshed successfully from database!', 'success');
+      
+      // Reload the page to show the new data
+      window.location.reload();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      onNotification('Error refreshing data: ' + error.message, 'error');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -139,6 +162,37 @@ const BackupSection = ({ data, onNotification }) => {
       <div className="text-center">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Backup & Export</h2>
         <p className="text-gray-600">Manage your data backups and exports</p>
+      </div>
+
+      {/* Database Sync */}
+      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-indigo-900 mb-4 flex items-center">
+          <SafeIcon icon={FiServer} className="mr-2" />
+          Database Synchronization
+        </h3>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <p className="text-indigo-700 mb-2">Refresh data from the database to ensure you have the latest records.</p>
+            <p className="text-sm text-indigo-600">This will update your local view with the current database state.</p>
+          </div>
+          <button
+            onClick={refreshFromDatabase}
+            disabled={isRefreshing}
+            className="flex items-center justify-center px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+          >
+            {isRefreshing ? (
+              <>
+                <SafeIcon icon={FiRefreshCw} className="animate-spin mr-2" />
+                Refreshing...
+              </>
+            ) : (
+              <>
+                <SafeIcon icon={FiRefreshCw} className="mr-2" />
+                Refresh From Database
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Data Summary */}
@@ -206,7 +260,7 @@ const BackupSection = ({ data, onNotification }) => {
                   <button
                     key={key}
                     onClick={() => exportToCSV(data[key], `${key}_data`)}
-                    disabled={count === 0}
+                    disabled={count === 0 || isExporting}
                     className="w-full flex items-center justify-between px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span className="capitalize">{key}</span>
@@ -223,7 +277,7 @@ const BackupSection = ({ data, onNotification }) => {
           <div className="space-y-4">
             <button
               onClick={exportBackupJSON}
-              disabled={totalRecords === 0}
+              disabled={totalRecords === 0 || isExporting}
               className="w-full flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <SafeIcon icon={FiSave} className="mr-2" />
@@ -236,7 +290,7 @@ const BackupSection = ({ data, onNotification }) => {
 
             <div className="border-t pt-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Restore from Backup
+                Import Local Backup (Cache Only)
               </label>
               <input
                 type="file"
@@ -251,26 +305,30 @@ const BackupSection = ({ data, onNotification }) => {
                   Importing backup...
                 </div>
               )}
+              <div className="mt-2 text-xs text-amber-600">
+                <strong>Note:</strong> This only updates your local cache, not the database. Use with caution.
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Danger Zone */}
-      <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-red-900 mb-4">Danger Zone</h3>
-        <div className="flex items-center justify-between">
+      {/* Database Notice */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+        <div className="flex items-start">
+          <SafeIcon icon={FiDatabase} className="text-yellow-500 mt-1 mr-3 flex-shrink-0" />
           <div>
-            <p className="text-red-700 font-medium">Clear All Data</p>
-            <p className="text-sm text-red-600">This will permanently delete all stored data</p>
+            <h4 className="text-md font-medium text-yellow-800 mb-2">Database Management</h4>
+            <p className="text-sm text-yellow-700 mb-2">
+              The admin dashboard is now connected to a database for persistent storage. All data is stored securely in the database.
+            </p>
+            <ul className="text-sm text-yellow-700 list-disc pl-5 space-y-1">
+              <li>Use the <strong>Data Management</strong> section to add, edit, or delete records in the database</li>
+              <li>Use the <strong>Refresh From Database</strong> button above to ensure you're viewing the latest data</li>
+              <li>The local backup feature only updates your browser's local cache, not the actual database</li>
+              <li>For full database management, please contact the system administrator</li>
+            </ul>
           </div>
-          <button
-            onClick={clearAllData}
-            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-          >
-            <SafeIcon icon={FiDatabase} className="mr-2" />
-            Clear All Data
-          </button>
         </div>
       </div>
     </div>
